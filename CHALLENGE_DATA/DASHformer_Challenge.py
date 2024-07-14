@@ -13,6 +13,7 @@ import numpy as np
 import json
 import random
 import tensorflow as tf
+import logging
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, Embedding
@@ -156,6 +157,10 @@ def create_transformer_model(max_seq_length, use_positional_encoding, vocab_size
 
 def main():
 
+    logging.basicConfig(filename='inference.log', level=logging.INFO,
+                    format='%(asctime)s:%(levelname)s:%(message)s')
+
+
     if len(sys.argv) < 2:
         print(f"USAGE: {sys.argv[0]} [option] [arguments]\n\
     -evaluate_DASHformer [Test sequences CSV] [Model .keras file] [Tokenizer file] [Max sequence length] [Predictions output file]\n")
@@ -227,7 +232,9 @@ def main():
         eval_results = model.evaluate(sequences_padded, class_labels_onehot)
 
         print("Loss:", eval_results[0])
+        logging.info(eval_results[0])
         print("Accuracy:", eval_results[1])
+        logging.info(eval_results[1])
 
         with open(output_probs_file, 'w') as file:
             file.write("Sequence,Label,Prediction\n")
