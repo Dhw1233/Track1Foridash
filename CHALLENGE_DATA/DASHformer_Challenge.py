@@ -25,6 +25,26 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.models import load_model
 from sklearn.model_selection import train_test_split
 
+def fine_tune_model(model, train_data, train_labels, epochs, batch_size, learning_rate):
+    # 将模型的层冻结，只训练顶层分类器
+    for layer in model.layers[:-3]:  # 假设最后三层是分类器相关的层
+        layer.trainable = False
+
+    # 修改最后几层的名称，以适应新的损失函数和优化器
+    for layer in model.layers[-3:]:
+        layer._name = layer.name.split('/')[-1]
+
+    # 重新编译模型
+    model.compile(optimizer=Adam(learning_rate=learning_rate),
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    # 训练模型
+    with tf.device('/cpu:0'):
+        model.fit(train_data, train_labels, epochs=epochs, batch_size=batch_size, validation_split=0.1)
+
+    return model
+
 class PositionalEncoding(tf.keras.layers.Layer):
     def __init__(self, use_positional_encoding, max_seq_length, embed_dim):
         super(PositionalEncoding, self).__init__()
@@ -156,20 +176,94 @@ def create_transformer_model(max_seq_length, use_positional_encoding, vocab_size
 #######################################################
 
 def main():
-
-    logging.basicConfig(filename='inference.log', level=logging.INFO,
-                    format='%(asctime)s:%(levelname)s:%(message)s')
-
-
+    tf.config.set_visible_devices([], 'GPU')
     if len(sys.argv) < 2:
         print(f"USAGE: {sys.argv[0]} [option] [arguments]\n\
     -evaluate_DASHformer [Test sequences CSV] [Model .keras file] [Tokenizer file] [Max sequence length] [Predictions output file]\n")
         sys.exit(1)
 
     cmd_option = sys.argv[1]
+    logging.basicConfig(filename='inference.log', level=logging.INFO,
+                    format='%(asctime)s:%(levelname)s:%(message)s')
+
+    if cmd_option == "-fine_tune":
+        if len(sys.argv) != 9:
+            print(f'USAGE: {sys.argv[0]} {sys.argv[1]} [Training sequences CSV]  [Model .keras file to load] [Tokenizer file] [Max sequence length] [Epochs] [Batch size] [Learning rate]\n')
+            sys.exit(1)
+
+        protein_seq_file = sys.argv[2]
+        keras_model_file = sys.argv[3]
+        tokenizer_file = sys.argv[4]
+        max_seq_length = int(sys.argv[5])
+        epochs = int(sys.argv[6])
+        batch_size = int(sys.argv[7])
+        learning_rate = float(sys.argv[8])
+
+        # 读取训练数据
+        # ...（省略数据读取代码）
+        if os.path.exists(protein_seq_file) == False:
+            print(f'Could not find sequences CSV file {protein_seq_file}')
+
+        if os.path.exists(keras_model_file) == False:
+            print(f'Could not keras model file {keras_model_file}')
+
+        # Assuming data_file format: sequence,class_label
+        sequences = []
+        class_labels = []
+
+        with open(protein_seq_file, 'r') as file:
+            for line in file:
+                sequence, label = line.strip().split(',')
+                sequences.append(sequence.split())  # Assuming sequences are whitespace-separated tokens
+                class_labels.append(int(label))  # Assuming class labels are integers
+
+        class_labels_onehot = to_categorical(class_labels)
+
+        print(f"Shape of one-hot encoded class labels: {class_labels_onehot.shape}")
+
+        # Define the classes while loading.
+        print(f'Loading model from {keras_model_file}')
+        model = load_model(keras_model_file, 
+                           custom_objects={"PositionalEncoding": PositionalEncoding,
+                                           "TransformerBlock": TransformerBlock,
+                                           "MultiHeadSelfAttention": MultiHeadSelfAttention})
+        
+        with open('model_summary.txt', 'w') as f:
+            model.summary(print_fn=lambda x: f.write(x + '\n'))
+
+        # Tokenization and Padding starts below..
+        print(f'Loading Tokenizer from {tokenizer_file}')
+        with open(tokenizer_file, 'r') as file:
+            tokenizer_config = file.read()
+
+        # Load tokenizer from JSON configuration
+        tokenizer = tokenizer_from_json(tokenizer_config)
+        sequences_tokenized = tokenizer.texts_to_sequences(sequences)
+        sequences_padded = pad_sequences(sequences_tokenized, maxlen=max_seq_length, padding='post')
+
+        # Write the information on vocabulary, etc.
+        vocab_size = len(tokenizer.word_index) + 1
+        output_dim = len(set(class_labels))
+        print(f"Vocab-size is {vocab_size}")
+        # 加载预训练模型
+        print(f'Loading model from {keras_model_file}')
+        model = load_model(keras_model_file, custom_objects={"PositionalEncoding": PositionalEncoding,
+                                                               "TransformerBlock": TransformerBlock,
+                                                               "MultiHeadSelfAttention": MultiHeadSelfAttention})
+
+        # Tokenization and Padding starts below..
+        # ...（省略数据预处理代码）
+
+        # Fine-tuning 模型
+        model = fine_tune_model(model, sequences_padded, class_labels_onehot, epochs, batch_size, learning_rate)
+
+        # 保存 fine-tuned 模型
+        model.save('fine_tuned_model.keras')
+
+
 
     # List the GPU devices, if any.
-    print(f"GPU devices: {tf.config.list_physical_devices('GPU')}")
+    # print(f"GPU devices: {tf.config.list_physical_devices('GPU')}")
 
     if cmd_option == "-evaluate_DASHformer":
         if len(sys.argv) != 7:
