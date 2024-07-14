@@ -247,8 +247,14 @@ def main():
                                                                "TransformerBlock": TransformerBlock,
                                                                "MultiHeadSelfAttention": MultiHeadSelfAttention})
         train_data, val_data, train_labels, val_labels = train_test_split(
-            sequences_padded, class_labels_onehot, test_size=0.01, random_state=42
+            sequences_padded, class_labels_onehot, test_size=0.1, random_state=42,stratify=class_labels
         )
+
+        _, train_class_counts = np.unique(np.argmax(train_labels,axis=1), return_counts=True)
+        _, val_class_counts = np.unique(np.argmax(val_labels,axis=1), return_counts=True)
+        print(np.argmax(val_labels,axis=1).shape)
+        print("Training set class counts:", train_class_counts)
+        print("Validation set class counts:", val_class_counts)
 
         # Fine-tuning 模型
         model = fine_tune_model(model, train_data, train_labels, 
