@@ -25,23 +25,19 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.models import load_model
 from sklearn.model_selection import train_test_split
 
-def fine_tune_model(model, train_data, train_labels, epochs, batch_size, learning_rate):
-    # 将模型的层冻结，只训练顶层分类器
-    for layer in model.layers[:-3]:  # 假设最后三层是分类器相关的层
+def fine_tune_model(model, train_data, train_labels, val_data, val_labels, epochs, batch_size, learning_rate):
+    # 冻结模型的部分层
+    for layer in model.layers[:-3]:
         layer.trainable = False
-
-    # 修改最后几层的名称，以适应新的损失函数和优化器
-    for layer in model.layers[-3:]:
-        layer._name = layer.name.split('/')[-1]
-
     # 重新编译模型
     model.compile(optimizer=Adam(learning_rate=learning_rate),
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
-
     # 训练模型
-    with tf.device('/cpu:0'):
-        model.fit(train_data, train_labels, epochs=epochs, batch_size=batch_size, validation_split=0.1)
+    model.fit(train_data, train_labels, 
+              epochs=epochs, 
+              batch_size=batch_size, 
+              validation_data=(val_data, val_labels))
 
     return model
 
@@ -250,12 +246,13 @@ def main():
         model = load_model(keras_model_file, custom_objects={"PositionalEncoding": PositionalEncoding,
                                                                "TransformerBlock": TransformerBlock,
                                                                "MultiHeadSelfAttention": MultiHeadSelfAttention})
-
-        # Tokenization and Padding starts below..
-        # ...（省略数据预处理代码）
+        train_data, val_data, train_labels, val_labels = train_test_split(
+            sequences_padded, class_labels_onehot, test_size=0.01, random_state=42
+        )
 
         # Fine-tuning 模型
-        model = fine_tune_model(model, sequences_padded, class_labels_onehot, epochs, batch_size, learning_rate)
+        model = fine_tune_model(model, train_data, train_labels, 
+                                val_data, val_labels, epochs, batch_size, learning_rate)
 
         # 保存 fine-tuned 模型
         model.save('fine_tuned_model.keras')
