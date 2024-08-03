@@ -1,0 +1,88 @@
+This directory contains the files distributed for challenge period of iDASH2024 Homomorphic Encryption Track.
+
+The main challenge is building a method to securely evaluate a pre-trained neural network model, referred to as DASHformer, for protein sequence classification. The method must rely on using a Homomorphic Encryption (HE) scheme for protection of the data.
+
+We describe the files under this directory:
+
+- DASHformer_Challenge.py: This is the python source code that can be used to load and test the DASHformer model on the example sequences. Participating teams can use this code as a starting point to load and inspect the model, and test it on the example dataset.
+
+- DASHformer_environment.requirements: These are the requirements for running DASHformer_Challenge.py script.
+
+- dashformer_model.png: The plotted model that shows general structure of layers.
+
+- dashformer_model_summary.txt: The model summary in text format.
+
+- dashformer.keras: This is the model file that contains DASHformer parameters.
+
+- dashformer_tokenizer.json: This is the tokenizer used in mapping the aminoacids into tokens used by DASHformer.
+
+- dashformer_model_parameters/: This directory contains the model parameters in text format. This is extracted purely based on names of layers and teams are free to use this as a reference point or extract the weights by manually inspecting the model.
+
+- example_AA_sequences.list: This is a text file that contains the protein sequences and their class assignments (0-24). This file is provided as an example for the input format to be used in the evaluation (benchmarking) period.
+
+Requirements and Running Example Code:
+======================================
+Unzip the challenge data directory:
+
+```
+unzip iDASH24_Track1_Challenge_Data.zip
+...[Enter the password]...
+```
+
+We use python version 3.8.2. Also, install requirements in DASHformer_environment.requirement:
+
+```
+pip install -r DASHformer_environment.requirements
+```
+
+After setting up the environment, run following command under challenge directory:
+
+```
+python DASHformer_Challenge.py -evaluate_DASHformer example_AA_sequences.list dashformer.keras dashformer_tokenizer.json 50 predictions.txt
+```
+
+This should load and run the model, and evaluate the results (~87% accuracy). Participants can use this code to load and inspect the model as well.
+
+Model Parameters:
+=================
+The general architecture of the model can be viewed in dashformer_model.png and dashformer_model_summary.txt.
+
+The detailed structure of the model can be inspected from DASHformer code (DASHformer_Challenge.py).
+
+Under the parameters directory, we provided the parameters (text formatted) for each of the components that are run in order:
+
+1) Tokenizer*
+2) Embedding
+3) Positional Encoding**
+4) Attention
+5) Layer-Normalization-1 
+6) Feed-forward-network  
+7) Layer-Normalization-2 
+8) Global Average Pooling
+9) Final Dense Classifier Layer
+
+We provide the textual parameters as a starting point while inspecting the model.
+
+* Tokenizer is provided as a separate json file described above.
+** Positional encoding are hardcoded parameters but they are included in the textual parameters directory for completeness.
+
+Remarks:
+========
+1- The python code and environment are provided as a reference. The teams do not have to rely on or use the python script or environment.
+2- Evaluation (benchmarking) stage will be performed using the instructions provided by the teams. HE-Track organizers will use a hold-out dataset that has same format as the example_AA_sequences.list file and evaluate prediction accuracy and time performance. Please refer to the track description or contact the organizers for the details of the evaluation metrics and procedures.
+
+DATA USAGE AND PUBLICATION AGREEMENT: By registering and/or participating in this challenge and receiving restricted access to the challenge dataset, members of all teams agree to abide by the following rules of data usage:
+1) DASHformer code and documentation is shared under MIT License. When participating teams use code/documentation, it is necessary to include the license and attributons to iDASH Organizers.
+2) Participating teams will not share the challenge dataset with others.
+3) Participating teams will not use the challenge dataset in any publications until after the iDASH24 Workshop concludes.
+4) This track requires every participating team to share their code and/or binaries under the BSD 3-Clause License Open Source license. The track co-organizers will upload all submitted code and/or binaries to a GitHub repository under the BSD 3-Clause License right after the competition results are announced. By submitting the code and/or binaries, the participants automatically consent to allow the track co-organizers to release the code and/or binaries under the BSD 3-Clause License.
+
+These are setup to ensure fairness among the participating teams.
+
+FAQ:
+====
+For more details, please check FAQ @ https://docs.google.com/document/d/1IyiYgL6mz6tpEpGZjA_sLC2Qd7TuW_6Zkv9XL9YNJdQ/edit?usp=sharing
+
+
+Miran Kim, Arif Harmanci, Luyao Chen, Xiaoqian Jiang
+iDASH HE Track Organizers 
