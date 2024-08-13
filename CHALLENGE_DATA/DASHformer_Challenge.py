@@ -1,17 +1,7 @@
-######################################
-#
-# Permission is hereby granted by the iDASH Organizing Committee, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-######################################
 import os
 import sys
 import numpy as np
 import json
-import random
 import tensorflow as tf
 import logging
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -19,21 +9,49 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, Embedding
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.utils import plot_model
 from tensorflow.keras.preprocessing.text import tokenizer_from_json
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.models import load_model
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.regularizers import l1
+
+# 在Dense层中添加L1正则化
+dense_layer_with_l1 = Dense(128, activation='relu', kernel_regularizer=l1(0.01))
+def factorial_tf(n):
+    return tf.math.reduce_prod(tf.range(1, n + 1, dtype=tf.float32))
+
+def polynomial_relu(x):
+    # return 0.5 * x + 0.2 * tf.pow(x, 2) + 0.05 * tf.pow(x, 3)
+    return x 
+
+def polynomial_softmax(x, degree=3):
+    poly_exp = sum(tf.math.pow(x, i) / factorial_tf(i) for i in range(degree + 1))
+    poly_exp = tf.nn.relu(poly_exp)  
+    return poly_exp / tf.reduce_sum(poly_exp, axis=-1, keepdims=True)
+
+class PolynomialReLU(tf.keras.layers.Layer):
+    def __init__(self):
+        super(PolynomialReLU, self).__init__()
+
+    def call(self, inputs):
+        return polynomial_relu(inputs)
+
+class PolynomialSoftmax(tf.keras.layers.Layer):
+    def __init__(self, degree=3):
+        super(PolynomialSoftmax, self).__init__()
+        self.degree = degree
+
+    def call(self, inputs):
+        return polynomial_softmax(inputs, self.degree)
 
 def fine_tune_model(model, train_data, train_labels, val_data, val_labels, epochs, batch_size, learning_rate):
-    # 冻结模型的部分层
-    for layer in model.layers[:-3]:
-        layer.trainable = False
-    # 重新编译模型
+    # for layer in model.layers[:-3]:
+    #     layer.trainable = False
+        
     model.compile(optimizer=Adam(learning_rate=learning_rate),
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
-    # 训练模型
+
     model.fit(train_data, train_labels, 
               epochs=epochs, 
               batch_size=batch_size, 
@@ -41,28 +59,6 @@ def fine_tune_model(model, train_data, train_labels, val_data, val_labels, epoch
 
     return model
 
-class PolynomialSoftmax(tf.keras.layers.Layer):
-    def __init__(self, degree=2, alpha=1.0):
-        super(PolynomialSoftmax, self).__init__()
-        self.degree = degree
-        self.alpha = alpha
-
-    def call(self, inputs):
-        # 应用多项式函数并进行缩放
-        polynomial_output = self.alpha * (inputs ** self.degree)
-        # 归一化多项式输出，使其总和为1
-        # 使用多项式函数作为权重
-        return polynomial_output
-    
-class PolyReLU(tf.keras.layers.Layer):
-    def __init__(self, alpha=0.1):
-        super(PolyReLU, self).__init__()
-        self.alpha = alpha
-
-    def call(self, inputs):
-        x = tf.maximum(0., inputs) + self.alpha * tf.minimum(0., inputs) ** 2
-        return x
-    
 class PositionalEncoding(tf.keras.layers.Layer):
     def __init__(self, use_positional_encoding, max_seq_length, embed_dim):
         super(PositionalEncoding, self).__init__()
@@ -107,13 +103,18 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
         self.value_dense = Dense(embed_dim)
         self.combine_heads = Dense(embed_dim)
 
+        # 使用 PolynomialSoftmax
+        self.polynomial_softmax = PolynomialSoftmax()
+
     # Compute attention score.
     def attention(self, query, key, value):
         score = tf.matmul(query, key, transpose_b=True)
         dim_key = tf.cast(tf.shape(key)[-1], tf.float32)
         scaled_score = score / tf.math.sqrt(dim_key)
-        polynomial_softmax = PolynomialSoftmax(degree=2, alpha=1.0)
-        weights = polynomial_softmax(scaled_score)
+
+        # 使用多项式逼近Softmax
+        weights = tf.nn.softmax(scaled_score,axis=-1)
+        
         output = tf.matmul(weights, value)
         return output, weights
 
@@ -158,8 +159,8 @@ class TransformerBlock(tf.keras.layers.Layer):
 
         # Instantiate FFN.
         self.ffn = tf.keras.Sequential([
-            Dense(ff_dim, activation=PolyReLU(alpha=0.1)),
-            Dense(embed_dim)
+            Dense(ff_dim, activation='relu',kernel_regularizer=l1(0.1)),  # L1正则化
+            Dense(embed_dim, kernel_regularizer=l1(0.1))  # L1正则化
         ])
                         
         self.layernorm1 = LayerNormalization(epsilon=1e-6, name="LayerNorm1")
@@ -188,7 +189,7 @@ def create_transformer_model(max_seq_length, use_positional_encoding, vocab_size
     for transformer_block in transformer_blocks:
         transformer_output = transformer_block(transformer_output)
     pool = tf.keras.layers.GlobalAveragePooling1D(name='GlobalPool_Transformers')(transformer_output)
-    dense = Dense(output_dim, activation="softmax", name='Dense_Classifier')(pool)
+    dense = Dense(output_dim, activation=PolynomialSoftmax(), name='Dense_Classifier')(pool)  # 使用多项式逼近Softmax
     model = Model(inputs=inputs, outputs=dense)
     return model
 
@@ -235,9 +236,11 @@ def main():
                 sequence, label = line.strip().split(',')
                 sequences.append(sequence.split())  # Assuming sequences are whitespace-separated tokens
                 class_labels.append(int(label))  # Assuming class labels are integers
-
+                # if int(label) == 13 or int(label) == 3 or int(label) == 17 or int(label) == 11 or int(label) == 19 or int(label) == 21:
+                #     sequences.append(sequence.split())  # Assuming sequences are whitespace-separated tokens
+                #     class_labels.append(int(label))
         class_labels_onehot = to_categorical(class_labels)
-
+        print(len(sequence))
         print(f"Shape of one-hot encoded class labels: {class_labels_onehot.shape}")
 
         # Define the classes while loading.
@@ -270,7 +273,7 @@ def main():
                                                                "TransformerBlock": TransformerBlock,
                                                                "MultiHeadSelfAttention": MultiHeadSelfAttention})
         train_data, val_data, train_labels, val_labels = train_test_split(
-            sequences_padded, class_labels_onehot, test_size=0.1, random_state=42,stratify=class_labels
+            sequences_padded, class_labels_onehot, test_size=0.2, random_state=72,stratify=class_labels
         )
 
         _, train_class_counts = np.unique(np.argmax(train_labels,axis=1), return_counts=True)
@@ -284,7 +287,7 @@ def main():
                                 val_data, val_labels, epochs, batch_size, learning_rate)
 
         # 保存 fine-tuned 模型
-        model.save('fine_tuned_model.keras')
+        model.save('fine_tuned.keras')
 
 
 
@@ -340,6 +343,7 @@ def main():
         # Load tokenizer from JSON configuration
         tokenizer = tokenizer_from_json(tokenizer_config)
         sequences_tokenized = tokenizer.texts_to_sequences(sequences)
+        
         sequences_padded = pad_sequences(sequences_tokenized, maxlen=max_seq_length, padding='post')
 
         # Write the information on vocabulary, etc.
@@ -348,9 +352,9 @@ def main():
         print(f"Vocab-size is {vocab_size}")
 
         prediction_results = model.predict(sequences_padded)
-
+        np.save("pre.npy",prediction_results)
         eval_results = model.evaluate(sequences_padded, class_labels_onehot)
-
+         
         print("Loss:", eval_results[0])
         logging.info(eval_results[0])
         print("Accuracy:", eval_results[1])
@@ -360,11 +364,11 @@ def main():
             file.write("Sequence,Label,Prediction\n")
             for sequence, label, prediction in zip(sequences, class_labels, prediction_results):
                 file.write(f"{sequence},{label},{np.argmax(prediction)}\n")
+                if label != np.argmax(prediction):
+                    print(label,np.argmax(prediction))
 
         ###############################################################################################
 
     
 if __name__ == '__main__':
     main()
-
-########################################
