@@ -128,6 +128,40 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
 
         return output
 
+def custom_activation(x,a=1.0, epsilon=0.1):
+    return tf.maximum(0., a * (x - epsilon)**3)
+
+class CustomLayerNormalization(tf.keras.layers.Layer):
+    def __init__(self, epsilon=1e-6, **kwargs):
+        super(CustomLayerNormalization, self).__init__(**kwargs)
+        self.epsilon = epsilon
+        self.min_value = 0.0
+        self.max_value = 1.0
+
+    def build(self, input_shape):
+        # 创建归一化参数，维度与输入的最后一维相同
+        self.gamma = self.add_weight(shape=(input_shape[-1],),
+                                     initializer='ones',
+                                     trainable=True,
+                                     name='gamma')
+        self.beta = self.add_weight(shape=(input_shape[-1],),
+                                     initializer='zeros',
+                                     trainable=True,
+                                     name='beta')
+
+    def call(self, inputs):
+        # 计算输入的均值和方差
+        min_val = tf.reduce_min(inputs)
+        max_val = tf.reduce_max(inputs)
+        normalized_inputs = (inputs - min_val) / (max_val - min_val)
+        return self.min_value + (normalized_inputs * (self.max_value - self.min_value))
+
+    def get_config(self):
+        # 配置字典，用于保存层的配置信息
+        base_config = super(CustomLayerNormalization, self).get_config()
+        base_config['epsilon'] = self.epsilon
+        return base_config
+
 class TransformerBlock(tf.keras.layers.Layer):
     def __init__(self, embed_dim, num_heads, attention_block_activation_type, ff_dim, rate=0.1):
         super(TransformerBlock, self).__init__()
@@ -135,7 +169,7 @@ class TransformerBlock(tf.keras.layers.Layer):
 
         # Instantiate FFN.
         self.ffn = tf.keras.Sequential([
-            Dense(ff_dim, name='ffn1', activation='relu'),
+            Dense(ff_dim, name='ffn1', activation=custom_activation),
             Dense(embed_dim, name='ffn2'),
         ])
                         
@@ -160,7 +194,7 @@ def create_transformer_model(max_seq_length, use_positional_encoding, vocab_size
     positional_encoding_layer = PositionalEncoding(use_positional_encoding, max_seq_length, embed_dim)(embedding_layer)
     transformer_blocks = []
     for _ in range(num_layers):
-        transformer_blocks.append(TransformerBlock(embed_dim, num_heads, attention_block_activation_type, ff_dim, rate))
+        transformer_blocks.append(TransformerBlock(embed_dim, num_heads,  ff_dim, rate))
     transformer_output = positional_encoding_layer
     for transformer_block in transformer_blocks:
         transformer_output = transformer_block(transformer_output)
@@ -318,20 +352,24 @@ def main():
         tokenizer = tokenizer_from_json(tokenizer_config)
         sequences_tokenized = tokenizer.texts_to_sequences(sequences)
         sequences_padded = pad_sequences(sequences_tokenized, maxlen=max_seq_length, padding='post')
-
+        random_indices = np.random.choice(1000, size=100, replace=False)
+        sequences_padded = sequences_padded[random_indices]
+        class_labels_onehot = class_labels_onehot[random_indices]
+        class_labels = np.array(class_labels)
+        class_labels = class_labels[random_indices].reshape(-1,1)
         # Write the information on vocabulary, etc.
         vocab_size = len(tokenizer.word_index) + 1
-        output_dim = len(set(class_labels))
+        output_dim = len(class_labels)
         print(f"Vocab-size is {vocab_size}")
-
+        # print(sequences_padded.shape)
         prediction_results = model.predict(sequences_padded)
-
+        np.savetxt("prediction_result.txt",np.concatenate((prediction_results,np.argmax(prediction_results,axis = 1).reshape(-1,1),class_labels),axis = 1))
         eval_results = model.evaluate(sequences_padded, class_labels_onehot)
 
         print("Loss:", eval_results[0])
-        logging.info(eval_results[0])
+        # logging.info(eval_results[0])
         print("Accuracy:", eval_results[1])
-        logging.info(eval_results[1])
+        # logging.info(eval_results[1])
 
         with open(output_probs_file, 'w') as file:
             file.write("Sequence,Label,Prediction\n")
